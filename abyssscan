@@ -1,5 +1,5 @@
 #!/bin/bash
-readonly VERSION="0.8"
+readonly VERSION="1.0"
 <<INTRO
 	Parcours un serveur tournant sous le système abyss afin d'en dévoiler l'arborescence
 	cpin @ 2019
